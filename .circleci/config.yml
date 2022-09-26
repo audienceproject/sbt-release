@@ -1,0 +1,54 @@
+version: 2.1
+
+orbs:
+  audienceproject: audienceproject/audienceproject@dev:17f0c4b
+  assume-role: airswap/assume-role@0.2.0
+  aws-cli: circleci/aws-cli@3.1.3
+
+jobs:
+  publish:
+    parameters:
+      build-variant:
+        type: string
+    docker:
+      - image: cimg/openjdk:8.0
+    steps:
+      - checkout
+      - restore_cache:
+          key: sbt-cache
+      - audienceproject/sonatype_publish:
+          sonatype-user: SONATYPE_USER
+          sonatype-password: SONATYPE_PASSWORD
+          gpg-private-key: SONATYPE_GPG_PRIVATE_KEY
+          gpg-passphrase: SONATYPE_GPG_PASSPHRASE
+          build-variant: << parameters.build-variant >>
+      - save_cache:
+          key: sbt-cache
+          paths:
+            - "~/.ivy2/cache"
+            - "~/.sbt"
+            - "~/.m2"
+            - "~/.cache/coursier/v1"
+
+workflows:
+  PublishLibrary:
+    jobs:
+      - publish:
+          name: publish snapshot
+          build-variant: SNAPSHOT
+          filters:
+            branches:
+              only: /.*/
+          context:
+            - maven-sonatype
+
+      - publish:
+          name: publish release
+          build-variant: RELEASE
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v.*/
+          context:
+            - maven-sonatype
