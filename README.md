@@ -23,8 +23,6 @@ and then follow the onscreen instructions.
 Add the following to `project/plugins.sbt`:
 
 ```sbt
-addSbtPlugin("com.frugalmechanic" % "fm-sbt-s3-resolver" % "0.20.0")
-
 addSbtPlugin("com.audienceproject.sbt" % "sbt-release" % "<VERSION>")
 ```
 
