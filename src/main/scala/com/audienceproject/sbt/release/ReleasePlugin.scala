@@ -2,13 +2,13 @@ package com.audienceproject.sbt.release
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.{IndexDiff, Repository}
-import org.eclipse.jgit.transport.RefSpec
 import org.eclipse.jgit.treewalk.FileTreeIterator
-import sbt.Keys.{aggregate, baseDirectory, version}
+import sbt.*
+import sbt.Keys.*
 import sbt.internal.util.ManagedLogger
-import sbt.{Def, _}
 
 import scala.Console.{BLUE, BOLD, GREEN, RESET}
+import scala.sys.process.*
 
 object ReleasePlugin extends AutoPlugin {
 
@@ -31,7 +31,7 @@ object ReleasePlugin extends AutoPlugin {
     val tagMessageTemplate = settingKey[String]("Template used to create the git tag description. Accepts as single '%s' placeholder for the version number")
   }
 
-  import autoImport._
+  import autoImport.*
 
   lazy val releaseTask = Def.task {
     implicit val logger: ManagedLogger = sbt.Keys.streams.value.log
@@ -54,7 +54,7 @@ object ReleasePlugin extends AutoPlugin {
       tagRelease((release / tagNameTemplate).value, (release / tagMessageTemplate).value, releaseVersion)
 
       bumpToVersion((release / commitMsgDevCycleTemplate).value, nextVersion)
-      push((release / tagNameTemplate).value, releaseVersion)
+      push()
 
       logger.info(s"${GREEN}Version $BLUE$BOLD$releaseVersion$RESET$GREEN was tagged and released")
     } else {
@@ -62,7 +62,7 @@ object ReleasePlugin extends AutoPlugin {
     }
   }
 
-  override def projectSettings: Seq[Def.Setting[_]] = Seq(
+  override def projectSettings: Seq[Def.Setting[?]] = Seq(
     release := releaseTask.value,
     release / commitMsgReleaseTemplate := Defaults.CommitMessageReleaseTemplate,
     release / commitMsgDevCycleTemplate := Defaults.CommitMessageDevVersionTemplate,
@@ -70,7 +70,7 @@ object ReleasePlugin extends AutoPlugin {
     release / tagMessageTemplate := Defaults.TagMessageTemplate,
     release / versionSbtFile := baseDirectory.value / Defaults.VersionFileName,
 
-    // Don't aggregate me, bro! Running this across sub-projects leads to weird results.
+    // Don't aggregate me, bro! Running this across subprojects leads to weird results.
     release / aggregate := false,
     ThisScope / release / aggregate := false,
     ThisBuild / release / aggregate := false,
@@ -94,18 +94,10 @@ object ReleasePlugin extends AutoPlugin {
       .call()
   }
 
-  private def push(nameTemplate: String, version: String)(implicit git: Git): Unit = {
+  private def push()(implicit logger: ManagedLogger): Unit = {
     // We want to run `git push --follow-tags`, but JGit doesn't support that out of the box.
-    // Instead, explicitly push the current branch and the newly created tag (to avoid pushing
-    // any non-release tags the user might have created).
-
-    git.push()
-      .setAtomic(true)
-      .setRefSpecs(
-        new RefSpec(s"refs/tags/${nameTemplate.format(version)}"),
-        new RefSpec(git.getRepository.getFullBranch)
-      )
-      .call()
+    // Instead, we rely on sys.process to do the work straight from the CLI.
+    "git push --follow-tags".!(logger)
   }
 
   private def assertRootProject(rootDir: File, projectDir: File)(implicit logger: ManagedLogger): File = {
@@ -154,4 +146,5 @@ object ReleasePlugin extends AutoPlugin {
     logger.error(s"!! $msg")
     throw ReleaseException(msg)
   }
+
 }

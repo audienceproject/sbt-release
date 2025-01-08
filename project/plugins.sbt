@@ -1,1 +1,1 @@
-addSbtPlugin("com.frugalmechanic" % "fm-sbt-s3-resolver" % "0.20.0")
+addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1")
