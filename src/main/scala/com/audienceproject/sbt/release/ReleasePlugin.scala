@@ -1,16 +1,23 @@
 package com.audienceproject.sbt.release
 
 import org.eclipse.jgit.api.Git
-import org.eclipse.jgit.lib.{IndexDiff, Repository}
+import org.eclipse.jgit.lib.{GpgConfig, IndexDiff, Repository, Signers}
+import org.eclipse.jgit.signing.ssh.SshSignerFactory
+import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.sshd.agent.ConnectorFactory
 import org.eclipse.jgit.treewalk.FileTreeIterator
+import org.eclipse.jgit.util.FS
 import sbt.*
 import sbt.Keys.*
 import sbt.internal.util.ManagedLogger
 
+import java.util.ServiceLoader
 import scala.Console.{BLUE, BOLD, GREEN, RESET}
-import scala.sys.process.*
 
 object ReleasePlugin extends AutoPlugin {
+
+  Signers.set(GpgConfig.GpgFormat.SSH, new SshSignerFactory().create())
+  ConnectorFactory.setDefault(ServiceLoader.load(classOf[ConnectorFactory], getClass.getClassLoader).iterator().next())
 
   object Defaults {
     val CommitMessageReleaseTemplate = "[sbt-release] 🎉 Release version %s 🎉"
@@ -54,7 +61,7 @@ object ReleasePlugin extends AutoPlugin {
       tagRelease((release / tagNameTemplate).value, (release / tagMessageTemplate).value, releaseVersion)
 
       bumpToVersion((release / commitMsgDevCycleTemplate).value, nextVersion)
-      push()
+      push((release / tagNameTemplate).value, releaseVersion)
 
       logger.info(s"${GREEN}Version $BLUE$BOLD$releaseVersion$RESET$GREEN was tagged and released")
     } else {
@@ -83,7 +90,22 @@ object ReleasePlugin extends AutoPlugin {
   private def bumpToVersion(messageTemplate: String, version: String)(implicit git: Git, versionFile: File): Unit = {
     IO.write(versionFile, s"""ThisBuild / version := "$version"\n""")
     git.add().addFilepattern(versionFile.name).call()
-    git.commit().setMessage(messageTemplate.format(version)).call()
+    val commit = git.commit().setMessage(messageTemplate.format(version))
+    getSigningKey().foreach(commit.setSigningKey)
+    commit.call()
+  }
+
+  private def getSigningKey()(implicit git: Git): Option[String] = {
+    val config = new GpgConfig(git.getRepository.getConfig)
+    if (config.getKeyFormat == GpgConfig.GpgFormat.SSH) {
+      Option(config.getSigningKey)
+        .filter(_.endsWith(".pub"))
+        .map { key =>
+          val file = if (key.startsWith("~/")) FS.DETECTED.resolve(FS.DETECTED.userHome(), key.drop(2)) else new File(key)
+          // A key literal makes JGit use ssh-agent instead of decrypting the adjacent private key.
+          s"key::${IO.read(file).trim}"
+        }
+    } else None
   }
 
   private def tagRelease(nameTemplate: String, messageTemplate: String, version: String)(implicit git: Git): Unit = {
@@ -94,10 +116,18 @@ object ReleasePlugin extends AutoPlugin {
       .call()
   }
 
-  private def push()(implicit logger: ManagedLogger): Unit = {
+  private def push(nameTemplate: String, version: String)(implicit git: Git): Unit = {
     // We want to run `git push --follow-tags`, but JGit doesn't support that out of the box.
-    // Instead, we rely on sys.process to do the work straight from the CLI.
-    "git push --follow-tags".!(logger)
+    // Instead, explicitly push the current branch and the newly created tag (to avoid pushing
+    // any non-release tags the user might have created).
+
+    git.push()
+      .setAtomic(true)
+      .setRefSpecs(
+        new RefSpec(s"refs/tags/${nameTemplate.format(version)}"),
+        new RefSpec(git.getRepository.getFullBranch)
+      )
+      .call()
   }
 
   private def assertRootProject(rootDir: File, projectDir: File)(implicit logger: ManagedLogger): File = {
